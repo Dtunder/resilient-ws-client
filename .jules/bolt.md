@@ -1,0 +1,3 @@
+## 2026-07-30 - Optimize Asyncio primitives overhead
+**Learning:** `asyncio.Queue.put` in python uses `await`, which unconditionally yields control to the event loop even for unbounded queues where it will never block. Combined with `await Event.wait()`, this introduces significant context switching overhead on hot paths.
+**Action:** Always prefer `queue.put_nowait()` over `await queue.put()` for unbounded queues, check `if not event.is_set(): await event.wait()` rather than just `await event.wait()`, and avoid calling `queue.task_done()` if `queue.join()` is never used. This is a common codebase-specific performance pattern in python `asyncio` applications processing high message volume.

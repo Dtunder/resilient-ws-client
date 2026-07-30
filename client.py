@@ -85,7 +85,8 @@ class ResilientWebSocketClient:
         while True:
             try:
                 # Wait until connected
-                await self._connected.wait()
+                if not self._connected.is_set():
+                    await self._connected.wait()
                 # Get message from queue
                 message = await self._queue.get()
             except asyncio.CancelledError:
@@ -93,23 +94,22 @@ class ResilientWebSocketClient:
                 
             try:
                 await self._ws.send(message)
-                self._queue.task_done()
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("Failed to send message, putting it back in queue")
-                await self._queue.put(message)
+                self._queue.put_nowait(message)
                 break
             except asyncio.CancelledError:
                 logger.warning("Send cancelled, putting message back in queue")
-                await self._queue.put(message)
+                self._queue.put_nowait(message)
                 break
             except Exception as e:
                 logger.error(f"Error sending message: {e}")
-                await self._queue.put(message)
+                self._queue.put_nowait(message)
                 break
 
     async def send(self, message: str):
         """Enqueue a message to be sent."""
-        await self._queue.put(message)
+        self._queue.put_nowait(message)
 
     async def stop(self):
         """Stop the client completely."""
