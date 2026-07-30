@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import logging
 import websockets
 from typing import Callable, Optional, Awaitable
@@ -23,7 +24,7 @@ class ResilientWebSocketClient:
         self.on_message = on_message
 
         self._queue = asyncio.Queue()
-        self._failed_message: Optional[str] = None
+        self._failed_messages = collections.deque()
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
         self._stop_event = asyncio.Event()
@@ -89,9 +90,8 @@ class ResilientWebSocketClient:
                 await self._connected.wait()
 
                 # Check if there is a failed message to retry first
-                if self._failed_message is not None:
-                    message = self._failed_message
-                    self._failed_message = None
+                if self._failed_messages:
+                    message = self._failed_messages.popleft()
                 else:
                     # Get message from queue
                     message = await self._queue.get()
@@ -102,16 +102,16 @@ class ResilientWebSocketClient:
                 await self._ws.send(message)
                 self._queue.task_done()
             except websockets.exceptions.ConnectionClosed:
-                logger.warning("Failed to send message, holding as failed_message")
-                self._failed_message = message
+                logger.warning("Failed to send message, holding in failed_messages")
+                self._failed_messages.appendleft(message)
                 break
             except asyncio.CancelledError:
-                logger.warning("Send cancelled, holding as failed_message")
-                self._failed_message = message
+                logger.warning("Send cancelled, holding in failed_messages")
+                self._failed_messages.appendleft(message)
                 break
             except Exception as e:
                 logger.error(f"Error sending message: {e}")
-                self._failed_message = message
+                self._failed_messages.appendleft(message)
                 break
 
     async def send(self, message: str):
