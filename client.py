@@ -23,6 +23,7 @@ class ResilientWebSocketClient:
         self.on_message = on_message
 
         self._queue = asyncio.Queue()
+        self._failed_message: Optional[str] = None
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
         self._stop_event = asyncio.Event()
@@ -86,8 +87,14 @@ class ResilientWebSocketClient:
             try:
                 # Wait until connected
                 await self._connected.wait()
-                # Get message from queue
-                message = await self._queue.get()
+
+                # Check if there is a failed message to retry first
+                if self._failed_message is not None:
+                    message = self._failed_message
+                    self._failed_message = None
+                else:
+                    # Get message from queue
+                    message = await self._queue.get()
             except asyncio.CancelledError:
                 break
                 
@@ -95,16 +102,16 @@ class ResilientWebSocketClient:
                 await self._ws.send(message)
                 self._queue.task_done()
             except websockets.exceptions.ConnectionClosed:
-                logger.warning("Failed to send message, putting it back in queue")
-                await self._queue.put(message)
+                logger.warning("Failed to send message, holding as failed_message")
+                self._failed_message = message
                 break
             except asyncio.CancelledError:
-                logger.warning("Send cancelled, putting message back in queue")
-                await self._queue.put(message)
+                logger.warning("Send cancelled, holding as failed_message")
+                self._failed_message = message
                 break
             except Exception as e:
                 logger.error(f"Error sending message: {e}")
-                await self._queue.put(message)
+                self._failed_message = message
                 break
 
     async def send(self, message: str):
